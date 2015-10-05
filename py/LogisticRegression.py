@@ -10,7 +10,7 @@ class LogisticRegression(object):
             value=np.zeros(
                 (n_in,n_out),
                 dtype=theano.config.floatX
-                ),
+            ),
             name='W',
             borrow=True
         )
@@ -19,7 +19,7 @@ class LogisticRegression(object):
             value=np.zeros(
                 (n_out,),
                 dtype=theano.config.floatX
-            )
+            ),
             name='b',
             borrow=True
         )
@@ -37,7 +37,7 @@ class LogisticRegression(object):
         return -T.mean(T.log(self.p_y_given_x)[T.arange(y.shape[0]),y])
 
     def errors(self,y):
-        if y.ndim != self.y_pred_ndim:
+        if y.ndim != self.y_pred.ndim:
             raise TypeError(
                 "y should have the same shape as self.y_pred",
                 ('y',y.type,'y_pred',self.y_pred.type))

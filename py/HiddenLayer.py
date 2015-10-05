@@ -23,11 +23,11 @@ class HiddenLayer(object):
                 w_values *= 4
 
             #actual weight matrix:
-            W = theano.shared(value=W_values, name='W',borrow=True)
+            W = theano.shared(value=w_values, name='W',borrow=True)
 
             if b is None:
                 #if no bias vector create a zero vector
-                b_values = numpy_zeros((n_out,),dtype=theano.config.floatX)
+                b_values = np.zeros((n_out,),dtype=theano.config.floatX)
                 b = theano.shared(value=b_values,name='b',borrow=True)
 
             #actually store the W and b
@@ -36,7 +36,7 @@ class HiddenLayer(object):
 
             #Setup the activation function:
             #first the non-linear, pre-activation function
-            lin_ouput = T.dot(input, self.W) + self.b
+            lin_output = T.dot(input, self.W) + self.b
             self.output = (
                 lin_output if activation is None
                 else activation(lin_output)

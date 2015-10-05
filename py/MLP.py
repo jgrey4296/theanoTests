@@ -2,6 +2,8 @@ import theano
 import theano.tensor as T
 from theano import function
 import numpy as np
+from HiddenLayer import HiddenLayer
+from LogisticRegression import LogisticRegression
 
 
 class MLP(object):
@@ -30,12 +32,12 @@ class MLP(object):
             )
 
         self.L2_sqr = (
-            (self.hiddenLayer.@ ** 2).sum()
+            (self.hiddenLayer.W ** 2).sum()
             + (self.logRegressionLayer.W ** 2).sum()
         )
 
         self.negative_log_likelihood = (
-            self.logRegressionLayer.negative_log_likelihood
+            self.logRegressionLayer.negLogLikelihood
             )
 
         self.errors = self.logRegressionLayer.errors

@@ -3,8 +3,6 @@ import sys
 import timeit
 import cPickle
 import gzip
-
-
 import theano
 import theano.tensor as T
 from theano import function
@@ -20,10 +18,7 @@ from MLP import MLP
 #load data and split it into input/output for
 #training, validation, and testing
 def load_data(dataset):
-    returnSet = []
-    returnSet[0] = [(,)]
-    returnSet[1] = [(,)]
-    returnSet[2] = [(,)]
+    returnSet = [[],[],[]]
 
     # Download the MNIST dataset if it is not present
     data_dir, data_file = os.path.split(dataset)
@@ -75,10 +70,10 @@ def load_data(dataset):
         variable) would lead to a large decrease in performance.
         """
         data_x, data_y = data_xy
-        shared_x = theano.shared(numpy.asarray(data_x,
+        shared_x = theano.shared(np.asarray(data_x,
                                                dtype=theano.config.floatX),
                                  borrow=borrow)
-        shared_y = theano.shared(numpy.asarray(data_y,
+        shared_y = theano.shared(np.asarray(data_y,
                                                dtype=theano.config.floatX),
                                  borrow=borrow)
         # When storing data on the GPU it has to be stored as floats
@@ -109,13 +104,13 @@ def load_data(dataset):
 
 
 #build  training, testing AND validation models
-def buildModel(n_hidden=500,batch_size=20,trainData,testData,validData):
+def buildModel(trainData,validData,testData,n_hidden=500,batch_size=20,L1_reg=0.00,L2_reg=0.0001,learning_rate=0.01):
 
     #initial (symbolic) variables shared everywhere
     index = T.lscalar() #index to minibatch
     x = T.matrix('x')   #input matrix
     y = T.ivector('y')  #output label vector
-    rng = numpy.random.RandomState(1244)
+    rng = np.random.RandomState(1244)
 
     #the network:
     classifier = MLP(
@@ -156,7 +151,7 @@ def buildModel(n_hidden=500,batch_size=20,trainData,testData,validData):
     gparams = [T.grad(cost,param) for param in classifier.params]
     #how to update parameters based on gradients:
     updates = [
-        (param, param - leraning_rate * gparam)
+        (param, param - learning_rate * gparam)
         for param, gparam in zip(classifier.params, gparams)
     ]
 
@@ -172,10 +167,10 @@ def buildModel(n_hidden=500,batch_size=20,trainData,testData,validData):
         }
     )
 
-    return [train_model,test_model,valid_model]
+    return [train_model,test_model,validate_model]
 
 #actually train the model:
-def trainModel(model,validationModel,testModel,n_train_batches,n_valid_batches,n_test_batches):
+def trainModel(model,validationModel,testModel,n_train_batches,n_valid_batches,n_test_batches,n_epochs):
     patience = 10000
     patience_increase = 2
     improvement_threshold = 0.995
@@ -187,7 +182,7 @@ def trainModel(model,validationModel,testModel,n_train_batches,n_valid_batches,n
     start_time = timeit.default_timer()
 
     epoch = 0
-    done_looping = false
+    done_looping = False
 
 
     #now actually loop:
@@ -220,7 +215,7 @@ def trainModel(model,validationModel,testModel,n_train_batches,n_valid_batches,n
                     if (thisValidationLoss < best_validation_loss * improvement_threshold):
                         patience = max(patience, iter * patience_increase)
 
-                    best_validation_loss = this_validation_loss
+                    best_validation_loss = thisValidationLoss
                     best_iter = iter
 
                     #test on test set:
@@ -249,18 +244,18 @@ def test_mlp(dataset,learning_rate=0.01, L1_reg=0.00,L2_reg=0.0001,
     #TODO: load and setup the datasets:
     loaded_dataset = load_data(dataset)
     #pairs of input + output data:
-    trainData = dataset[0]
-    validData = dataset[1]
-    testData  = datasets[2]
+    trainData = loaded_dataset[0]
+    validData = loaded_dataset[1]
+    testData  = loaded_dataset[2]
     
     # compute number of minibatches for training, validation and testing
     n_train_batches = trainData[0].get_value(borrow=True).shape[0] / batch_size
     n_valid_batches = validData[0].get_value(borrow=True).shape[0] / batch_size
     n_test_batches  = testData[0].get_value(borrow=True).shape[0] / batch_size
 
-    trainingModel, testModel, validModel = buildModel(n_hidden,batch_size,trainData,testData,validData)
+    trainingModel, testModel, validModel = buildModel(trainData,validData,testData,n_hidden,batch_size,L1_reg,L2_reg,learning_rate)
                                                    
-    trainModel(trainingModel,validModel,testModel)
+    trainModel(trainingModel,validModel,testModel,n_train_batches,n_valid_batches,n_test_batches,n_epochs)
 
                                                    
 if __name__ == '__main__':
