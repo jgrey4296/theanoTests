@@ -6,6 +6,10 @@ import theano.tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
 import codecs
 from textblob import TextBlob
+import logging
+
+logging.basicConfig(filename="../data/last_rnnOutput.log",level=logging.DEBUG)
+
 
 #input data:
 import reberGrammar
@@ -31,10 +35,14 @@ train_data = []
 #but the actual sequence is more than one, so:
 #AS  : B,   BT,  BTS, BTSX,BTSXS,BTSXSE
 #POSS: T/P, S/X, S/X, X/S, E    ,0
-with codecs.open("../data/begi.txt","r","utf-8") as f:
+with codecs.open("../data/Horus Rising - Dan Abnett.txt","r","utf-8") as f:
     blob = TextBlob(f.read())
 
-lowerCaseBlob = blob.lower()
+#takes a blob, returns a new blob
+def preprocess(blob):
+    return TextBlob("".join(filter(lambda x: x!=u'\n',blob)).lower())
+
+lowerCaseBlob = preprocess(blob)
 
 sentences = lowerCaseBlob.sentences
 vocabChars = list(set(lowerCaseBlob)) #set to filter duplicates
@@ -121,10 +129,10 @@ learning_rate = theano.shared(lr) #turn it into a shared variable
 #reminder: theano.shared copies the type of the value passed in
 
 #training epochs:
-nb_epochs = 1000
+nb_epochs = 500
 
 #number of steps to sample:
-sampleStepLength = 100
+sampleStepLength = 50
 
 #---------- END OF HYPERPARAMETERS
 
@@ -220,39 +228,24 @@ def get_train_function(cost, v, target):
 #actually create the training function
 trainFunction = get_train_function(cost,v,target)
 
-#create the training routine:
-def train_routine(train_data, nb_epochs=50):
-    print("Starting Training routine")
-    train_errors = np.ndarray(nb_epochs)
-    for x in range(nb_epochs):
-        error = 0.
-        for j in range(len(train_data)):
-            index = np.random.randint(0,len(train_data))
-            dataInput, trueOutput = train_data[index]
-            train_cost = trainFunction(dataInput,trueOutput)
-            print("Epoch: ",x, " Trained: ",j," cost: ",train_cost)
-            error = train_cost
-        train_errors[x] = error
-    return train_errors
 
-
-train_errors = train_routine(numericTrainingData, nb_epochs)
 
 #------------------------------
-# PREDICTION
+#PREDICTION
 #------------------------------
-# print("predicting")
-# #to predict:
-# predictionFunction = theano.function(inputs=[v],outputs = output_states)
+print("predicting")
+#to predict, just get the output instead of the cost,
+#and don't update
+predictionFunction = theano.function(inputs=[v],outputs = output_states)
 
-# #TODO:
-# inp, outp = reberGrammar.get_one_example(10)
-# prediction = predictionFunction(inp)
+def testPrediction():
+    inp, outp = reberGrammar.get_one_example(10)
+    prediction = predictionFunction(inp)
 
-# for p,o in zip(prediction,outp):
-#     print( "Predicted:",p)
-#     print( "Output:",o)
-#     print()
+    for p,o in zip(prediction,outp):
+        print( "Predicted:",p)
+        print( "Output:",o)
+        print()
 
 
 #------------------------------
@@ -292,8 +285,39 @@ startState = theano.shared(startValues)
                                                   outputs_info=[h0,startState],
                                                   non_sequences=[w_ih,w_hh,w_ho,b_h,b_o])
 
+
+
 #create the main sampling function
 sampleFunction = theano.function(inputs=[],outputs=outputState, updates=updates)
+
+def createSample():
+    sampled = sampleFunction()
+    sample_sequence = np.concatenate(([startValues], sampled), axis=0)
+    words = sequenceToText(sample_sequence)
+    logging.info("Generated String: %s" % (words))
+    print("Generated: ",words)
+    
+#create the training routine:
+def train_routine(train_data, nb_epochs=50):
+    print("Starting Training routine")
+    train_errors = np.ndarray(nb_epochs)
+    for x in range(nb_epochs):
+        error = 0.
+        print('Epoch: ',x)
+        logging.info("Epoch: %s" % (x))
+        for j in range(len(train_data)):
+            index = np.random.randint(0,len(train_data))
+            dataInput, trueOutput = train_data[index]
+            train_cost = trainFunction(dataInput,trueOutput)
+            if((x-1) % 100 == 0 and j % 100 == 0):
+                print("Epoch: ",x, " Trained: ",j," cost: ",train_cost)
+                
+            error = train_cost
+        createSample()
+        train_errors[x] = error
+    return train_errors
+
+train_errors = train_routine(numericTrainingData, nb_epochs)
 
 #now print out the results of sampling:
 for i in range(20):
