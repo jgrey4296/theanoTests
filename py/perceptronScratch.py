@@ -57,9 +57,10 @@ def load_data(dataset):
     #input is an numpy.ndarray of 2 dimensions (a matrix)
     #whose row's correspond to an example.
     #target is a 1 dimensional np array / vector with length of
-    #the number of rows in the input.
+    #the number of rows/examples in the input.
     #It should give the target to the example with the same
-    #index in the input.    
+    #index in the input.
+    #so f(input[i]) -> target[i]
     def shared_dataset(data_xy, borrow=True):
         """ Function that loads the dataset into shared variables
         
@@ -106,19 +107,26 @@ def load_data(dataset):
 #build  training, testing AND validation models
 def buildModel(trainData,validData,testData,n_hidden=500,batch_size=20,L1_reg=0.00,L2_reg=0.0001,learning_rate=0.01):
 
+    print("Building Model:")
+    print("Train Data Shape:",trainData[0].get_value(borrow=True).shape)
+    print("Train Data Target Shape:",trainData[1].shape)
+
+    
     #initial (symbolic) variables shared everywhere
     index = T.lscalar() #index to minibatch
     x = T.matrix('x')   #input matrix
     y = T.ivector('y')  #output label vector
     rng = np.random.RandomState(1244)
 
+    input_node_size = trainData[0].get_value(borrow=True).shape[1]
+    
     #the network:
     classifier = MLP(
         rng=rng,
         input=x,
-        n_in=28*28, #TODO: change this to dimensions of x
+        n_in=input_node_size, #28*28,
         n_hidden=n_hidden,
-        n_out=10    #TODO: change this to dimensions of y
+        n_out=10    #TODO: change this to len(y)
         )
 
     #the cost function:
@@ -154,6 +162,9 @@ def buildModel(trainData,validData,testData,n_hidden=500,batch_size=20,L1_reg=0.
         (param, param - learning_rate * gparam)
         for param, gparam in zip(classifier.params, gparams)
     ]
+
+    #for RNN:
+    #updates += classifier.rnnUpdates
 
 
     #the training model that will update itself

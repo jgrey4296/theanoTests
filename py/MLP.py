@@ -26,6 +26,7 @@ class MLP(object):
         )
 
         #setup regularization
+        #TODO: add recurrent layer weights into regularization
         self.L1 = (
             abs(self.hiddenLayer.W).sum()
             + abs(self.logRegressionLayer.W).sum()

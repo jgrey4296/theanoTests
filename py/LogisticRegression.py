@@ -24,10 +24,15 @@ class LogisticRegression(object):
             borrow=True
         )
 
-        #computing the class membership:
+        #computing the class membership,
+        #ie: all probabilities of classes
+        #produces a matrix of [inputExample,[probabilities for class]]
+        #input === x, so a matrix of examples
+        #returns matrix of class probabilities
         self.p_y_given_x = T.nnet.softmax(T.dot(input,self.W)+self.b)
 
-        #get the maximum value from axis 1 of the output of pygx
+        #gets the maximum predicted value index for each
+        #axis 1=rows
         self.y_pred = T.argmax(self.p_y_given_x,axis=1)
 
         self.params = [self.W, self.b]

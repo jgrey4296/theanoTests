@@ -19,10 +19,12 @@ class HiddenLayer(object):
                 dtype=theano.config.floatX
                 )
             if activation == theano.tensor.nnet.sigmoid:
-                #if sigmoid, scale up?
+                #if sigmoid, scale up? why?
                 w_values *= 4
 
             #actual weight matrix:
+            #creates the shared weight matrix, with the same
+            #type as w_values 
             W = theano.shared(value=w_values, name='W',borrow=True)
 
             if b is None:
