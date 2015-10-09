@@ -10,10 +10,6 @@ import logging
 
 logging.basicConfig(filename="../data/last_rnnOutput.log",level=logging.DEBUG)
 
-
-#input data:
-import reberGrammar
-
 dtype=theano.config.floatX
 srng = RandomStreams(seed=235)
 
@@ -23,7 +19,7 @@ srng = RandomStreams(seed=235)
 # Loaded first, to setup the network sizes
 #------------------------------
 
-#TODO:load data:
+#load data:
 train_data = []
 #todo: inspect the form of this, adapt loaded data to it
 #should be a 3d matrix of examples.
@@ -137,9 +133,10 @@ sampleStepLength = 50
 #squash to between 0 and 1
 #def logistic_function(x):
 sigma = lambda x: 1./(1+ T.exp(-x))
-
+actF = T.tanh
 #cross entropy loss:
-cost = lambda t,os: -T.mean(t*T.log(os)+(1.-t)*T.log(1.-os))
+def getCost(inV,expected):
+    return -T.mean(expected * T.log(inV)+(1.-expected)*T.log(1.-inV))
 
 
 #---------- END OF HYPERPARAMETERS
@@ -167,55 +164,98 @@ def sample_weights(sizeX,sizeY):
     return values
 
 #parameter creation:
-def get_parameters(n_in,n_out,n_hid):
-    print("Creating Parameters")
-    output_bias = theano.shared(np.zeros(n_out,dtype=dtype))
-    hidden_bias = theano.shared(np.zeros(n_hid,dtype=dtype))
-    hidden_state = theano.shared(np.zeros(n_hid,dtype=dtype))
-    
-    inputGate_weights = theano.shared(sample_weights(n_in,n_hid))
-    hiddenGate_weights = theano.shared(sample_weights(n_hid,n_hid))
-    outputGate_weights = theano.shared(sample_weights(n_hid,n_out))
-    
-    return inputGate_weights,hiddenGate_weights,hidden_bias,outputGate_weights,output_bias,hidden_state
+n_i = n_c = n_o = n_f = n_hid
+print("Creating Parameters")
+#weights:
+#input:xt1,htm1,ctm1
+input_xt1 = theano.shared(sample_weights(n_in,n_i))
+input_htm1 = theano.shared(sample_weights(n_hid,n_i))
+input_ctm1 = theano.shared(sample_weights(n_c,n_i))
+#forget:xt,htm1,ctm1
+forget_xt = theano.shared(sample_weights(n_in,n_f))
+forget_htm1 = theano.shared(sample_weights(n_hid,n_f))
+forget_ctm1 = theano.shared(sample_weights(n_c,n_f))
+#cell:xt,htm1
+cell_xt = theano.shared(sample_weights(n_in,n_c))
+cell_htm1 = theano.shared(sample_weights(n_hid,n_c))
+#output:xt,htm1,ct
+out_xt = theano.shared(sample_weights(n_in,n_o))
+out_htm1 = theano.shared(sample_weights(n_hid,n_o))
+out_ct = theano.shared(sample_weights(n_c,n_o))
+#squash:ht
+hidden_ht = theano.shared(sample_weights(n_hid,n_out))
 
-w_ih, w_hh, b_h, w_ho, b_o, h0 = get_parameters(n_in,n_out,n_hid)
-params = [w_ih,w_hh,b_h,w_ho,b_o,h0]
+#biases:
+#input,forget,cell,output,hiden
+b_i = theano.shared(np.cast[dtype](np.random.uniform(-0.5,.5,size = n_i)))
+b_f = theano.shared(np.cast[dtype](np.random.uniform(0, 1.,size = n_f)))
+b_c = theano.shared(np.zeros(n_c, dtype=dtype))
+b_o = theano.shared(np.cast[dtype](np.random.uniform(-0.5,.5,size = n_o)))
+b_out = theano.shared(np.zeros(n_out, dtype=dtype))
 
+#sequenceState:
+c0 = theano.shared(np.zeros(n_hid,dtype=dtype))
+h0 = T.tanh(c0)
+
+params = [
+    input_xt1,input_htm1,input_ctm1,forget_xt,forget_htm1,forget_ctm1,cell_xt,cell_htm1,out_xt,out_htm1,out_ct,hidden_ht,b_i,b_f,b_c,b_o,b_out
+]
+
+#MODIFIED FOR LSTM:
 
 #a step of the network:
 #input sequence: x_t,
-#prior results : h_tm1
-#constants:
-#	input,hidden, and output weights: w_ih,w_hh,w_ho,
-#	biases : b_h,b_o
-print("Defining one_step")
-def one_step(x_t,h_tm1,w_ih,w_hh,w_ho,b_h,b_o):
-    hidden_state = T.tanh(theano.dot(x_t,w_ih) + theano.dot(h_tm1,w_hh) + b_h)
-    output_state = theano.dot(hidden_state,w_ho) + b_o
-    squashed_output = sigma(output_state)
-    return [hidden_state,squashed_output]
+#prior results : h_tm1, c_tm1,
+#constants: 
+#       W_[input,forget]gate[xt,htm1,ctm1], B_[input,forget]
+#       W_[cell][xt,htm1], B_cell
+#       W_output[xt,htm1,ct]gate, B_output
+#       W_squash_ht, b_ht
 
+print("Defining one_step")
+def one_step(x_t,h_tm1,c_tm1,
+             w_ixt,w_ihtm1,w_ictm1,b_i,
+             w_fxt,w_fhtm1,w_fctm1,b_f,
+             w_cxt,w_chtm1,b_c,
+             w_oxt,w_ohtm1,w_oct,b_o,
+             w_sht,b_ht):
+
+    inputGate_t = sigma(theano.dot(x_t,w_ixt) + theano.dot(h_tm1,w_ihtm1) + theano.dot(c_tm1,w_ictm1) + b_i)
+    forgetGate_t = sigma(theano.dot(x_t,w_fxt) + theano.dot(h_tm1,w_fhtm1) + theano.dot(c_tm1,w_fctm1) + b_f)
+    cellState_t = forgetGate_t * c_tm1 + inputGate_t * actF(theano.dot(x_t,w_cxt) + theano.dot(h_tm1,w_chtm1) + b_c)
+    outGate_t = sigma(theano.dot(x_t,w_oxt) + theano.dot(h_tm1,w_ohtm1) + theano.dot(cellState_t,w_oct) + b_o)
+    hidden_t = outGate_t * actF(cellState_t)
+    outState_t = sigma(theano.dot(hidden_t,w_sht) + b_ht)
+    return [hidden_t,cellState_t,outState_t]
+    
 #show how to process a sequence:
 #updates = none
 #the dict constucted is really as simple as it looks,
 #specify what to use (input) and which to use from the input (taps)
-[hidden_states, output_states], nonSpecifiedUpdates = theano.scan(fn=one_step,
-                                                                  sequences = dict(input=v, taps=[0]),
-                                                                  #o_i initialises first inptu, for h_tm1
-                                                                  outputs_info = [h0, None], #return type of one_step
-                                                                  non_sequences = [w_ih,w_hh,w_ho,b_h,b_o])
+[hidden_states, _, output_states], _ = theano.scan(fn=one_step,\
+                                                   sequences = dict(input=v, taps=[0]),
+                                                   #o_i initialises first inptu, for h_tm1
+                                                   outputs_info = [h0, c0, None], #return type of one_step
+                                                   non_sequences = [
+                                                       input_xt1,input_htm1,input_ctm1,b_i,
+                                                       forget_xt,forget_htm1,forget_ctm1,b_f,
+                                                       cell_xt,cell_htm1,b_c,
+                                                       out_xt,out_htm1,out_ct,b_o,
+                                                       hidden_ht,b_out]
+)
 
 #define the cost function
 #cross entropy loss
 #cost = -T.mean(target * T.log(output_states) + (1. - target) *# T.log(1. - output_states))
 
 #create the training function, setting up parameter adjustments:
-def get_train_function(cost, v, target):
+def get_train_function(v, target):
     print("Creating Training Function")
+    cost = getCost(output_states,target)
     #gradients:
     gparams = []
     for param in params:
+        #print(param)
         gparam = T.grad(cost, param)
         gparams.append(gparam)
 
@@ -230,7 +270,7 @@ def get_train_function(cost, v, target):
     return trainFunction
 
 #actually create the training function
-trainFunction = get_train_function(cost,v,target)
+trainFunction = get_train_function(v,target)
 
 
 
@@ -265,16 +305,26 @@ def get_sample(probs):
 #no sequences,
 #prior results of: h_tm1, y_tm1
 #non-sequences of: w_ih,w_hh,w_ho,b_h,b_o 
+#PAY ATTENTION TO THE SHIFTED ORDER OF THE FIRST LINE:
+def sampling_step(h_tm1,c_tm1,x_t,
+                  w_ixt,w_ihtm1,w_ictm1,b_i,
+                  w_fxt,w_fhtm1,w_fctm1,b_f,
+                  w_cxt,w_chtm1,b_c,
+                  w_oxt,w_ohtm1,w_oct,b_o,
+                  w_sht,b_ht):
+    inputGate_t = sigma(theano.dot(x_t,w_ixt) + theano.dot(h_tm1,w_ihtm1) + theano.dot(c_tm1,w_ictm1) + b_i)
+    forgetGate_t = sigma(theano.dot(x_t,w_fxt) + theano.dot(h_tm1,w_fhtm1) + theano.dot(c_tm1,w_fctm1) + b_f)
+    cellState_t = forgetGate_t * c_tm1 + inputGate_t * actF(theano.dot(x_t,w_cxt) + theano.dot(h_tm1,w_chtm1) + b_c)
+    outGate_t = sigma(theano.dot(x_t,w_oxt) + theano.dot(h_tm1,w_ohtm1) + theano.dot(cellState_t,w_oct) + b_o)
+    hidden_t = outGate_t * actF(cellState_t)
+    outState_t = sigma(theano.dot(hidden_t,w_sht) + b_ht)
 
-def sampling_step(h_tm1,y_tm1,w_ih,w_hh,w_ho,b_h,b_o):
-    hiddenState = T.tanh(theano.dot(y_tm1,w_ih) + theano.dot(h_tm1,w_hh) + b_h)
-    currentState = theano.dot(hiddenState,w_ho) + b_o
-    squashedState = sigma(currentState)
-    normalisedState = squashedState / T.sum(squashedState)
+    #then normalise and sample:
+    normalisedState = outState_t / T.sum(outState_t)
     probabilityDist = get_sample(normalisedState)
     castForOutput = T.cast(probabilityDist,dtype)
-    #keep going until a terminal symbol in original dataset is reached:
-    return [hiddenState,castForOutput], theano.scan_module.until(T.eq(T.argmax(castForOutput),sentenceStop))
+    
+    return [hidden_t,cellState_t,castForOutput],theano.scan_module.until(T.eq(T.argmax(castForOutput),sentenceStop))
 
 
 #create the start symbol:
@@ -283,16 +333,22 @@ startValues = charToOneHot('t')
 startState = theano.shared(startValues)
 
 #create the sampling scan:
-[hiddenStates,outputState], updates = theano.scan(fn=sampling_step,
+[sampleHiddenStates,sampleCellStates,sampleOutputStates], updates = theano.scan(fn=sampling_step,
                                                   sequences=[],
                                                   n_steps = sampleStepLength,
-                                                  outputs_info=[h0,startState],
-                                                  non_sequences=[w_ih,w_hh,w_ho,b_h,b_o])
+                                                  outputs_info=[h0,c0,startState],
+                                                  non_sequences = [
+                                                       input_xt1,input_htm1,input_ctm1,b_i,
+                                                       forget_xt,forget_htm1,forget_ctm1,b_f,
+                                                       cell_xt,cell_htm1,b_c,
+                                                       out_xt,out_htm1,out_ct,b_o,
+                                                       hidden_ht,b_out]
+)
 
 
 
 #create the main sampling function
-sampleFunction = theano.function(inputs=[],outputs=outputState, updates=updates)
+sampleFunction = theano.function(inputs=[],outputs=sampleOutputStates, updates=updates)
 
 def createSample():
     sampled = sampleFunction()
