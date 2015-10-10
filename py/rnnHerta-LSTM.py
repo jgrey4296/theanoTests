@@ -1,4 +1,4 @@
-#from http://www.christianherta.de/lehre/dataScience/machineLearning/neuralNetworks/recurrentNeuralNetworks.php
+ #from http://www.christianherta.de/lehre/dataScience/machineLearning/neuralNetworks/recurrentNeuralNetworks.php
 from __future__ import print_function
 import numpy as np
 import theano
@@ -60,7 +60,7 @@ for sent in sentences:
         sequence.append(char)
     for char in sent[1:]:
         nextOutput.append(char)
-    nextOutput.append(sent[-1])#to make them the same length
+    nextOutput.append(sent[-1])#to make them the same length?
     trainingData.append((sequence,nextOutput))
 #at this point we have an array of examples
 #where examples are tuples of (inputDataSequence,outputSequence)
@@ -87,7 +87,9 @@ def sequenceToText(sequence):
     return string
 
 #now convert the data
-numericTrainingData = []
+allInputs = []
+allOutputs = []
+print("setting up numeric representations")
 for sequence,output in trainingData:
     numericInput = []
     numericOutput = []
@@ -95,11 +97,36 @@ for sequence,output in trainingData:
         numericInput.append(charToOneHot(char))
     for char in output:
         numericOutput.append(charToOneHot(char))
-    numericTrainingData.append((numericInput,numericOutput))
 
-#at this point, all the training data should be loaded into numericTrainingData
+    #matrices of [len(sequence),len(vocab)]
+    ni = np.array(numericInput,dtype=dtype)
+    no = np.array(numericOutput,dtype=dtype)
+    #list len(examples) of tuples(matrixInput,matrixOutput)
+    #where matrix' = [len(sequence),len(vocab)]
+    #numericTrainingData.append((numericInput,numericOutput))
+    allInputs.append(ni)
+    allOutputs.append(no)
+
     
-#convert to matrix? reber isnt?
+print("Finished numeric representations:,")
+print("Number of examples:",len(allInputs))
+#at this point, all the training data should be loaded into allInputs/outputs
+    
+#TODO: zero pad the matrix so it can be shared
+
+
+print("Constructing Shared Variables for Data")
+#load into shared variable for minibatch
+#needing 3d matrices of [len(examples),len(sequence),len(vocab)]
+
+print("size of input data:",len(allInputs))
+
+
+trainData = theano.shared(allInputs, borrow=True)
+
+targetData = theano.shared(allOutputs, borrow=True)
+
+print("Finished shared variable setup")
 
 #--------------------
 # NETWORK SETUP:
@@ -107,14 +134,16 @@ for sequence,output in trainingData:
 
 #network sizes
 n_in = len(vocabChars)
-n_hid = int(len(vocabChars) * 0.8)
+n_hid = int(len(vocabChars) * 0.5)
 n_out = len(vocabChars)
 
-#the input:
+#the inpuit index for loaded batch
+index = T.lscalar()
+batch_index = T.lscalar()
 #Matrix: a vector of timesteps of a vector of input values
-v = T.matrix(dtype=dtype) 
+xt = T.matrix(dtype=dtype)
 #the expected output
-target = T.matrix(dtype=dtype)
+yt = T.matrix(dtype=dtype)
 
 #----------------------------------------
 #Hyperparameters:
@@ -125,7 +154,10 @@ learning_rate = theano.shared(lr) #turn it into a shared variable
 #reminder: theano.shared copies the type of the value passed in
 
 #training epochs:
-nb_epochs = 500
+nb_epochs = 10000
+
+BATCH_SIZE = 200
+n_training_batches = trainData.get_value(borrow=True).shape[0] / BATCH_SIZE
 
 #number of steps to sample:
 sampleStepLength = 50
@@ -233,8 +265,8 @@ def one_step(x_t,h_tm1,c_tm1,
 #the dict constucted is really as simple as it looks,
 #specify what to use (input) and which to use from the input (taps)
 [hidden_states, _, output_states], _ = theano.scan(fn=one_step,\
-                                                   sequences = dict(input=v, taps=[0]),
-                                                   #o_i initialises first inptu, for h_tm1
+                                                   sequences = dict(input=xt, taps=[0]),
+                                                   #o_i initialises first input, for h_tm1
                                                    outputs_info = [h0, c0, None], #return type of one_step
                                                    non_sequences = [
                                                        input_xt1,input_htm1,input_ctm1,b_i,
@@ -249,9 +281,9 @@ def one_step(x_t,h_tm1,c_tm1,
 #cost = -T.mean(target * T.log(output_states) + (1. - target) *# T.log(1. - output_states))
 
 #create the training function, setting up parameter adjustments:
-def get_train_function(v, target):
+def get_train_function(inputData, expectedResponse):
     print("Creating Training Function")
-    cost = getCost(output_states,target)
+    cost = getCost(output_states,yt)
     #gradients:
     gparams = []
     for param in params:
@@ -263,14 +295,18 @@ def get_train_function(v, target):
     for param,gparam in zip(params,gparams):
         updates.append((param,param - gparam * learning_rate))
 
-    trainFunction = theano.function(inputs=[v,target],
+    trainFunction = theano.function(inputs=[batch_index,index],
                                     outputs = cost,
-                                    updates = updates)
+                                    updates = updates,
+                                    givens={
+                                        xt : inputData[batch_index * BATCH_SIZE + index],
+                                        yt : expectedResponse[batch_index*BATCH_SIZE + index]
+                                    })
     print("Training Function Created")
     return trainFunction
 
 #actually create the training function
-trainFunction = get_train_function(v,target)
+trainFunction = get_train_function(trainData,targetData)
 
 
 
@@ -280,7 +316,7 @@ trainFunction = get_train_function(v,target)
 print("predicting")
 #to predict, just get the output instead of the cost,
 #and don't update
-predictionFunction = theano.function(inputs=[v],outputs = output_states)
+predictionFunction = theano.function(inputs=[xt],outputs = output_states)
 
 def testPrediction():
     inp, outp = reberGrammar.get_one_example(10)
@@ -358,26 +394,30 @@ def createSample():
     print("Generated: ",words)
     
 #create the training routine:
-def train_routine(train_data, nb_epochs=50):
+def train_routine(nb_epochs=50):
     print("Starting Training routine")
-    train_errors = np.ndarray(nb_epochs)
+    train_errors = []#np.ndarray(nb_epochs)
+    #for each epoch:
     for x in range(nb_epochs):
+        currentErrors = []
         error = 0.
         print('Epoch: ',x)
         logging.info("Epoch: %s" % (x))
-        for j in range(len(train_data)):
-            index = np.random.randint(0,len(train_data))
-            dataInput, trueOutput = train_data[index]
-            train_cost = trainFunction(dataInput,trueOutput)
-            if((x-1) % 100 == 0 and j % 100 == 0):
-                print("Epoch: ",x, " Trained: ",j," cost: ",train_cost)
-                
-            error = train_cost
+        #run a number of batches
+        for batch_index in range(n_training_batches):
+            for index in range(BATCH_SIZE):
+                #train on the batch
+                train_cost = trainFunction(batch_index,index)
+                if(x % 20 == 0):
+                    print("Epoch: ",x, " Batch: ",y," cost: ",train_cost)
+                    
+                currentErrors.append(train_cost)
+        
         createSample()
-        train_errors[x] = error
+        train_errors.append(currentErrors)
     return train_errors
 
-train_errors = train_routine(numericTrainingData, nb_epochs)
+train_errors = train_routine(nb_epochs)
 
 #now print out the results of sampling:
 for i in range(20):
